@@ -1,4 +1,3 @@
-import os
 import pickle
 import numpy as np
 from deepface import DeepFace
@@ -8,10 +7,10 @@ from deepface import DeepFace
 # ==========================================
 
 DATABASE_PATH = "embeddings/face_database.pkl"
-TEST_FOLDER = "test"
 
 MODEL_NAME = "ArcFace"
-THRESHOLD = 0.25
+
+THRESHOLD = 0.70
 
 # ==========================================
 # Load Database
@@ -20,7 +19,7 @@ THRESHOLD = 0.25
 with open(DATABASE_PATH, "rb") as f:
     database = pickle.load(f)
 
-print("Database Loaded Successfully!\n")
+print("Face Database Loaded Successfully!")
 
 # ==========================================
 # Cosine Similarity
@@ -37,88 +36,80 @@ def cosine_similarity(a, b):
 
 
 # ==========================================
-# Process Every Test Image
+# Face Recognition
 # ==========================================
 
-for image_name in os.listdir(TEST_FOLDER):
+def recognize(face):
 
-    image_path = os.path.join(TEST_FOLDER, image_name)
+    if face is None:
+        return "Unknown", 0.0
 
-    if not image_name.lower().endswith(
-        (".jpg", ".jpeg", ".png", ".bmp")
-    ):
-        continue
-
-    print("=" * 60)
-    print(f"Testing : {image_name}")
-    print("=" * 60)
+    if face.size == 0:
+        return "Unknown", 0.0
 
     try:
 
         result = DeepFace.represent(
 
-            img_path=image_path,
+            img_path=face,
 
             model_name=MODEL_NAME,
 
-            detector_backend="opencv",
-
-            enforce_detection=True,
-
-            align=True
+            detector_backend="skip",
+            enforce_detection=False,
+            align=False
 
         )
 
-        test_embedding = np.array(result[0]["embedding"])
+        test_embedding = np.array(
+            result[0]["embedding"]
+        )
 
-    except Exception as e:
+    except Exception:
 
-        print("Face not detected!")
-        print(e)
-        print()
+        return "Unknown", 0.0
 
-        continue
+    scores = []
 
-    best_person = "Unknown"
-    best_score = -1
-
-    # Compare with every person
-
-    for person in database:
+    # Compare against every person
+    for person, embeddings in database.items():
 
         similarities = []
 
-        for embedding in database[person]:
+        for embedding in embeddings:
 
-            score = cosine_similarity(
+            similarity = cosine_similarity(
                 test_embedding,
                 embedding
             )
 
-            similarities.append(score)
+            similarities.append(similarity)
 
-        average_score = np.mean(similarities)
+        # Take Top-3 Similarities
+        top_k = min(3, len(similarities))
 
-        print(
-            f"{person:<10} : {average_score:.4f}"
+        score = np.mean(
+            sorted(
+                similarities,
+                reverse=True
+            )[:top_k]
         )
 
-        if average_score > best_score:
+        scores.append(
+            (person, score)
+        )
 
-            best_score = average_score
-            best_person = person
+    # Sort Descending
+    scores.sort(
+        key=lambda x: x[1],
+        reverse=True
+    )
 
-    print()
+    best_person, best_score = scores[0]
 
-    if best_score >= THRESHOLD:
+    # Unknown Person
+    if best_score < THRESHOLD:
 
-        print(f"Prediction : {best_person}")
-        print(f"Similarity : {best_score:.4f}")
-        print(f"Confidence : {best_score*100:.2f}%")
+        return "Unknown", float(best_score)
 
-    else:
-
-        print("Prediction : Unknown")
-        print(f"Highest Similarity : {best_score:.4f}")
-
-    print()
+    return best_person, float(best_score)
